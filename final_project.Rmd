@@ -1,0 +1,38 @@
+---
+title: "Final_Project"
+output: html_document
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(pacman)
+
+pacman::p_load(pacman, Amelia, caret, cluster, devtools, factoextra, gbm, GGally, ggplot2, ggthemes, 
+  ggvis, ggbiplot,httr, knitr,lubridate, plotly, pROC,randomForest, rio, rpart, rpart.plot, rmarkdown, shiny, 
+  stringr, stats,tidyr, tidyverse) 
+
+set.seed(123)
+```
+
+
+### Load Data
+
+```{r cars}
+df <- import('data/C3longitudinal.csv')
+info_cols <- c('STATE','RecSource','genderV0','ethnicityV0','raceV0_2','raceV0_4','employV0','incomeV0','housekidV0','eduV0')
+risk_cols <- c('smokeV0','esmokeV0')
+df[,50:100]
+
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+ggplot(df, 'vsmokeV0')
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
