@@ -19,14 +19,20 @@ set.seed(123)
 
 ### Load Data
 
-```{r cars}
-df <- import('data/C3longitudinal.csv')
-info_cols <- c('STATE','RecSource','genderV0','ethnicityV0','raceV0_2','raceV0_4','employV0','incomeV0','housekidV0','eduV0')
-risk_cols <- c('smokeV0','esmokeV0')
-df[,50:100]
+```{r process_data}
+df <- import('data/C3longitudinal_clean.csv')
+info_cols <- c('STATE','RecSource','DurationV0','age','household_size','air_travel','gender','race')
+risk_cols <- c('smokeV0','esmokeV0','antiviral','booster')
+interest_cols <- c('early_vax_interest','delay_side_effects','delay_inconvenient','delay_trust','children_delay_se','children_delay_incon','children_delay_trust')
+exposure_cols <- c('swimming_1','park_1','no_exp','swimming_2','park_2','no_exp2','movie_1','mall_1','church_1','movie_2','mall_2','church_2')
+outcome_cols <- c('had_covid')
 
+df[,interest_cols]
 ```
 
+```{r unsupervised}
+
+```
 ## Including Plots
 
 You can also embed plots, for example:
