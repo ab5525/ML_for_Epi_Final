@@ -23,14 +23,27 @@ set.seed(123)
 df <- import('data/C3longitudinal_clean.csv')
 info_cols <- c('STATE','RecSource','DurationV0','age','household_size','air_travel','gender','race')
 risk_cols <- c('smokeV0','esmokeV0','antiviral','alcohol_use')
-interest_cols <- c('early_vax_interest','delay_side_effects','delay_inconvenient','delay_trust','children_delay_se','children_delay_incon','children_delay_trust')
-exposure_cols <- c('swimming_1','park_1','no_exp','swimming_2','park_2','no_exp2','movie_1','mall_1','church_1','movie_2','mall_2','church_2')
+interest_cols <- c('early_vax_interest','delay_side_effects','delay_inconvenient','delay_trust')
+                  
+children_cols <- c('children_delay_se','children_delay_incon','children_delay_trust')
+
+exposure_cols <- c('swimming_1','park_1','swimming_2','park_2',
+                   'movie_1','mall_1','church_1','movie_2','mall_2','church_2')
+
+#removed from above becasue people werent consistent on it 
+no_exposure <- c('no_exp','no_exp2')
+
 outcome_cols <- c('had_covid','booster','vaccinated')
+
+risk_exposure <- c(exposure_cols, risk_cols)
+
 fear_cols <- c()
 
 df[,interest_cols]
 ```
 ```{r}
+set.seed(123)
+
 df <- na.omit(df)
 library(dplyr)
 
@@ -41,7 +54,8 @@ df <- df %>% mutate(
                              + swimming_2 + park_2 + movie_2 + mall_2 + church_2 + air_travel),
 )
 
-df
+df.lgl <- colnames(df[,sapply(df,is.logical)])
+df[,df.lgl] <- lapply(df[,df.lgl], factor)
 ```
 
 ```{r propensity scoring}
@@ -52,13 +66,27 @@ ps.model.logit <- glm(combined_any ~ age + gender + race + household_size ,
     
     # estimates odds of eversmoke, then convert to probability (aka the propensity score)
     prop.score <- (predict(ps.model.logit, df, type="response"))
-    df$PS.LOGIT <- prop.score
+    df$PS <- prop.score
     
     # Logistic Regression model can be misspecified rather easily. Example, do age and smoking have a linear relationship?
     
    #temp<-table(nmesdata$eversmk, df$LASTAGE) 
     #pct.eversmk <- 100*(temp[2, ] / (temp[2,] + temp[1,]))
     #plot(40:94, pct.eversmk, xlab="Age", ylab="% ever smokers", pch=".", cex=7, cex.lab=1.5, cex.axis=1.5)
+```
+```{r}
+df1 <- df[, c(risk_exposure,'PS','booster','had_covid','vaccinated')]
+
+train.index<-createDataPartition(y=df$had_covid,p=0.7,list=FALSE)
+df.train <- df1[train.index,]
+df.test <- df1[-train.index,]
+
+train.index2<-createDataPartition(y=df$vaccinated,p=0.7,list=FALSE)
+df.train2 <- df1[train.index2,]
+df.test2 <- df1[-train.index2,]
+
+
+df.train
 ```
 
 
@@ -96,16 +124,16 @@ df[df$interest_cluster == 2, interest_cols]
 ```
 
 
-### logistic regression predictions for fun
+### logistic regression predictions
 ```{r logistic regression}
-logit <- glm(vaccinated ~ PS.LOGIT + hoax + early_vax_interest + air_travel ,
+logit <- glm(vaccinated ~ PS + hoax + early_vax_interest + air_travel ,
                     data=df, family=binomial(link="logit"))
 
 summary(logit)
 
 
 #social
-logit <- glm(vaccinated ~ PS.LOGIT + smokeV0 + esmokeV0 + alcohol_use,
+logit <- glm(vaccinated ~ PS + smokeV0 + esmokeV0 + alcohol_use,
                     data=df, family=binomial(link="logit"))
 
 summary(logit)
@@ -113,9 +141,120 @@ summary(logit)
 #social
 
 print('Had covid')
-logit <- glm(had_covid ~ PS.LOGIT + vaccinated + booster + early_vax_interest,
+logit <- glm(had_covid ~ PS + vaccinated + booster + early_vax_interest,
                     data=df, family=binomial(link="logit"))
 
 summary(logit)
+```
+
+```{r random forest tuning}
+
+feat.count<-c((ncol(df.train)-1)/2, sqrt(ncol(df.train)-1), (ncol(df.train)-1))
+
+grid.rf<-expand.grid(mtry=feat.count)
+
+control.obj<-trainControl(method="cv", number=5, sampling='up')
+
+tree.num<-seq(100,700, by=100)
+results.trees<-list()
+for (ntree in tree.num){
+  set.seed(123)
+    rf.model<-train(had_covid~., data=df.train, method="rf", trControl=control.obj, metric="Accuracy", tuneGrid=grid.rf, importance=TRUE, ntree=ntree)
+    index<-toString(ntree)
+  results.trees[[index]]<-rf.model$results
+}
+
+output <-bind_rows(results.trees, .id = "ntrees")
+best.tune<-output[which.max(output[,"Accuracy"]),]
+best.tune$mtry
+results.trees
+mtry.grid<-expand.grid(.mtry=best.tune$mtry)
+
+######
+#predicting vaccination
+feat.count2<-c((ncol(df.train2)-1)/2, sqrt(ncol(df.train2)-1), log(ncol(df.train2)-1))
+
+grid.rf2<-expand.grid(mtry=feat.count2)
+
+control.obj2<-trainControl(method="cv", number=5, sampling='up')
+
+tree.num<-seq(100,700, by=100)
+results.trees2<-list()
+for (ntree in tree.num){
+  set.seed(123)
+    rf.model2<-train(vaccinated~., data=df.train2, method="rf", trControl=control.obj2, metric="Accuracy", tuneGrid=grid.rf2, importance=TRUE, ntree=ntree)
+    index<-toString(ntree)
+  results.trees2[[index]]<-rf.model2$results
+}
+
+output2 <-bind_rows(results.trees2, .id = "ntrees")
+best.tune2<-output2[which.max(output2[,"Accuracy"]),]
+best.tune2$mtry
+results.trees2
+mtry.grid2<-expand.grid(.mtry=best.tune2$mtry)
+
+```
+
+```{r random forest model}
+set.seed(123)
+    rf.model<-train(had_covid~., data=df.train, method="rf", trControl=control.obj, metric="Accuracy", tuneGrid=mtry.grid, importance=TRUE, ntree=as.numeric(best.tune$ntrees))
+
+confusionMatrix(rf.model)
+varImp(rf.model)
+```
+# Prediction on test set 
+
+```{r test_set}
+
+#Predict in test-set and output probabilities
+rf.preds<- rf.model %>% predict(df.test)
+#predict(rf.model, df.test, type="prob")
+
+#Pull out predicted probabilities for Diabetes=Yes
+#rf.probability<-rf.preds[,2]
+
+cm = confusionMatrix(rf.preds, df.test$had_covid)
+cm
+
+```
+
+
+# plotting
+```{r plotting_calibration}
+pred.prob<-data.frame(Class=df.test$had_covid, rf=rf.probability)
+
+calplot<-(calibration(Class ~ rf, data=pred.prob, class=TRUE, cuts=10))
+
+xyplot(calplot, auto.key=list(columns=1))
+
+
+
+cal.data.index<-df.test$had_covid%>% createDataPartition(p=0.5, list=F)
+cal.data<-df.test[cal.data.index, ]
+final.test.data<-df.test[-cal.data.index, ]
+#Predict on test-set without scaling to obtain raw pred prob in test set
+rf.probs.nocal<-predict(rf.model, final.test.data, type="prob")
+rf.pp.nocal<-rf.probs.nocal[,2]
+
+#Apply model developed on training data to calibration dataset to obtain predictions
+rf.probs.cal<-predict(rf.model, cal.data, type="prob")
+rf.pp.cal<-rf.probs.cal[,2]
+
+#Add to dataset with actual values from calibration data
+calibrf.data.frame<-data.frame(rf.pp.cal, cal.data$had_covid)
+colnames(calibrf.data.frame)<-c("x", "y")
+
+#Use logistic regression to model predicted probabilities from calibration data to actual vales
+calibrf.model<-glm(y ~ x, data=calibrf.data.frame, family = binomial)
+
+#Apply calibration model above to raw predicted probabilities from test set
+data.test.rf<-data.frame(rf.pp.nocal)
+colnames(data.test.rf)<-c("x")
+platt.data.rf<-predict(calibrf.model, data.test.rf, type="response")
+
+platt.prob.rf<-data.frame(Class=final.test.data$had_covid, rf.platt=platt.data.rf, rf=rf.pp.nocal)
+
+calplot.rf<-(calibration(Class ~ rf.platt+rf, data=platt.prob.rf, class=TRUE, cuts=10))
+xyplot(calplot.rf, auto.key=list(columns=2))
 ```
 
