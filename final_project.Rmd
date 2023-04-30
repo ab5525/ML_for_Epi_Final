@@ -41,12 +41,15 @@ fear_cols <- c()
 
 df[,interest_cols]
 ```
-```{r}
+
+```{r Some simplification}
 set.seed(123)
 
 df <- na.omit(df)
 library(dplyr)
 
+
+#combine the exposure columns a bit
 df <- df %>% mutate(
    combined_1 = as.logical(swimming_1 + park_1 + movie_1 + mall_1 + church_1 + air_travel),
    combined_2 = as.logical(swimming_2 + park_2 + movie_2 + mall_2 + church_2),
@@ -54,8 +57,9 @@ df <- df %>% mutate(
                              + swimming_2 + park_2 + movie_2 + mall_2 + church_2 + air_travel),
 )
 
-df.lgl <- colnames(df[,sapply(df,is.logical)])
-df[,df.lgl] <- lapply(df[,df.lgl], factor)
+#change logical columns to factors 
+#df.lgl <- colnames(df[,sapply(df,is.logical)])
+df[,outcome_cols] <- lapply(df[,outcome_cols], factor)
 ```
 
 ```{r propensity scoring}
