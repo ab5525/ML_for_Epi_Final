@@ -65,7 +65,34 @@ ps.model.logit <- glm(combined_any ~ age + gender + race + household_size ,
 ### Unsupervised learning and clustering
 
 ```{r unsupervised}
+dist.matrix <- dist(df[,interest_cols], method="euclidean")
+h <- hclust(dist.matrix, method="complete")
+plot(h)
 
+silhouette_score <- function(k){
+    cluster <- cutree(tree=h, k=k)
+    ss <- silhouette(cluster, dist.matrix)
+    mean(ss[, 3])
+}
+
+k <- 2:20
+
+avg_sil <- sapply(k, silhouette_score)
+sil_df <- data.frame(Clusters=k, Score=avg_sil)
+p <- ggplot(sil_df, mapping=aes(x=Clusters, y=Score)) + geom_point(size=3) + labs(x="Number of Clusters", y="Silhouette Score") +
+          theme(axis.line = element_line(colour = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_rect(fill = 'white'))
+
+print(p)
+
+### although 2 clusters shows the highest silhouette score, it is not particularly informative (probably tells us only people who are interested vs not interested). 7 clusters seems to show a marked increase in score from 6 clusters, so that may be the best option to show patterns in vaccine interest.
+
+clustering <- cutree(tree=h, k=7)
+clustering <- as.factor(clustering)
+df$interest_cluster <- clustering
+
+### each cluster has a different approach to interest. For example, cluster 1 are interested in vaccines early, and will not be delayed for any reason. Cluster 2 are interested in vaccines early, but they would delay for side effects and inconveniences for themselves although not for their children. Etc.
+
+df[df$interest_cluster == 2, interest_cols]
 ```
 
 
