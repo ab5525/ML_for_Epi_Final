@@ -16,12 +16,13 @@ pacman::p_load(pacman, Amelia, caret, cluster, devtools, factoextra, gbm, GGally
 set.seed(123)
 ```
 
+Introduction: Public health officials have historically had difficulty understanding the reasons that people resist recommendations. During the covid-19 pandemic, vaccinations, the following booster campaigns ran into resistance preventing them from being fully effective. We believe that using data collected from individuals could provide predictions on whom is most likely to be vaccinated, get the disease, and the reasons for each of those. Our models will take into account social factors, risks, and pandemic fear and attempt to provide insight into the behavior of individuals in the population. 
 
 ### Load Data
 
 ```{r process_data}
 df <- import('data/C3longitudinal_clean.csv')
-info_cols <- c('STATE','RecSource','DurationV0','age','household_size','air_travel','gender','race')
+info_cols <- c('STATE','RecSource','age','household_size','air_travel','gender','race')
 risk_cols <- c('smokeV0','esmokeV0','antiviral','alcohol_use')
 interest_cols <- c('early_vax_interest','delay_side_effects','delay_inconvenient','delay_trust')
                   
@@ -33,13 +34,14 @@ exposure_cols <- c('swimming_1','park_1','swimming_2','park_2',
 #removed from above becasue people werent consistent on it 
 no_exposure <- c('no_exp','no_exp2')
 
-outcome_cols <- c('had_covid','booster','vaccinated')
+outcome_cols <- c('had_covid','booster','vaccinated','vax_comb')
 
 risk_exposure <- c(exposure_cols, risk_cols)
 
 fear_cols <- c()
 
 df[,'booster']
+df[,interest_cols]
 ```
 
 ```{r Some simplification}
@@ -51,6 +53,7 @@ library(dplyr)
 
 #combine the exposure columns a bit
 df <- df %>% mutate(
+   delay_any = as.logical(delay_side_effects + delay_inconvenient + delay_trust),
    combined_1 = as.logical(swimming_1 + park_1 + movie_1 + mall_1 + church_1 + air_travel),
    combined_2 = as.logical(swimming_2 + park_2 + movie_2 + mall_2 + church_2),
    combined_any = as.logical(swimming_1 + park_1 + movie_1 + mall_1 + church_1 
@@ -60,11 +63,12 @@ df <- df %>% mutate(
 #change logical columns to factors 
 #df.lgl <- colnames(df[,sapply(df,is.logical)])
 df[,outcome_cols] <- lapply(df[,outcome_cols], factor)
+df
 ```
 
 ```{r propensity scoring}
 # logistic regression for if someone ever went to exposure locations based on race, age, gender etc.  
-ps.model.logit <- glm(combined_any ~ age + gender + race + household_size + STATE ,
+ps.model.logit <- glm(combined_any ~ age + gender + race ,
                     data=df, family=binomial(link="logit"))
     summary(ps.model.logit)
     
@@ -79,20 +83,27 @@ ps.model.logit <- glm(combined_any ~ age + gender + race + household_size + STAT
     #plot(40:94, pct.eversmk, xlab="Age", ylab="% ever smokers", pch=".", cex=7, cex.lab=1.5, cex.axis=1.5)
 ```
 ```{r}
-df1 <- df[, c(no_exposure,risk_exposure,'PS','booster','had_covid','vaccinated')]
+train.index<-createDataPartition(y=df$vaccinated,p=0.7,list=FALSE)
+fdf.train <- df[train.index,]
+fdf.test <- df[-train.index,]
+
+
+
+df1 <- df[, c(no_exposure,risk_exposure,'PS','had_covid','vaccinated')]
+#df1 <- df[, c("combined_any",no_exposure,risk_cols,'PS','had_covid','vaccinated')]
 
 train.index<-createDataPartition(y=df$had_covid,p=0.7,list=FALSE)
 df.train <- df1[train.index,]
 df.test <- df1[-train.index,]
 
 
-df1 <- df[, c(no_exposure,interest_cols,'vaccinated')]
+df1 <- df[, c(risk_exposure,interest_cols,'PS','vaccinated')]
 train.index2<-createDataPartition(y=df$vaccinated,p=0.7,list=FALSE)
 df.train2 <- df1[train.index2,]
 df.test2 <- df1[-train.index2,]
 
 
-df.train
+summary(df.train)
 ```
 
 
@@ -137,31 +148,61 @@ df$interest_cluster <- clustering
 
 ### each cluster has a different approach to interest. For example, cluster 1 are interested in vaccines early, and will not be delayed for any reason. Cluster 2 are interested in vaccines early, but they would delay for side effects and inconveniences for themselves although not for their children. Etc.
 
-df[df$interest_cluster == 4, interest_cols]
+df[df$interest_cluster == 1, interest_cols]
 ```
 
 
 ### logistic regression predictions
 ```{r logistic regression}
-logit <- glm(vaccinated ~ PS + hoax + early_vax_interest + air_travel ,
-                    data=df, family=binomial(link="logit"))
 
+logit <- glm(had_covid ~ PS  + antiviral + booster+alcohol_use + air_travel + combined_2,
+                    data=df, family=binomial(link="logit"))
 summary(logit)
 
+control.obj<-trainControl(method="cv", number=5)
+fam <- 'binomial'
 
-#social
-logit <- glm(vaccinated ~ PS + smokeV0 + esmokeV0 + alcohol_use,
-                    data=df, family=binomial(link="logit"))
+set.seed(123)
+logit<-train(vaccinated~ PS + hoax + early_vax_interest +antiviral+combined_any, data=fdf.train, method="glm", family=fam, preProcess=c("center", "scale"), trControl=control.obj)
 
-summary(logit)
+logit$results
+confusionMatrix(logit)
+coef(logit$finalModel)
 
-#social
+logit.prob<- logit %>% predict(fdf.test)
 
-print('Had covid')
-logit <- glm(had_covid ~ PS + vaccinated + booster + early_vax_interest,
-                    data=df, family=binomial(link="logit"))
+cm = confusionMatrix(logit.prob, fdf.test$vaccinated, positive = 'TRUE')
+cm
 
-summary(logit)
+###### Had covid
+control.obj<-trainControl(method="cv", number=5)
+
+set.seed(123)
+logit<-train(had_covid~ PS + hoax+ booster + antiviral + early_vax_interest+alcohol_use + air_travel + combined_any, data=fdf.train, method="glm", family=fam, preProcess=c("center", "scale"), trControl=control.obj)
+
+logit$results
+confusionMatrix(logit)
+coef(logit$finalModel)
+
+logit.prob<- logit %>% predict(fdf.test)
+
+cm = confusionMatrix(logit.prob, fdf.test$had_covid, positive = 'TRUE')
+cm
+```
+```{r svm attempt}
+set.seed(123)
+
+control.obj<-trainControl(method="cv", number=5)
+
+svc.model<-train(vaccinated~ PS  + early_vax_interest +antiviral+combined_1, data=fdf.train, method="svmLinear", trControl=control.obj, preProcess=c("center", "scale"), probability=TRUE, tuneGrid=expand.grid(C=seq(0.0001,100, length=5)))
+
+svc.model$bestTune
+svc.model$results
+confusionMatrix(svc.model)
+
+svc.prob<- svc.model %>% predict(fdf.test)
+cm = confusionMatrix(svc.prob, fdf.test$vaccinated, positive = 'TRUE')
+cm
 ```
 
 ```{r random forest tuning}
@@ -183,19 +224,19 @@ feat.count<-c((ncol(df.train)-1)/2, sqrt(ncol(df.train)-1), (ncol(df.train)-1))
 
 grid.rf<-expand.grid(mtry=feat.count)
 
-control.obj<-trainControl(method="cv", number=5, sampling='up',summaryFunction = twoClassSummary)
+control.obj<-trainControl(method="cv", number=5, sampling = 'up')
 
 tree.num<-seq(100,300, by=100)
 results.trees<-list()
 for (ntree in tree.num){
   set.seed(123)
-    rf.model<-train(had_covid~., data=df.train, method="rf", trControl=control.obj, metric="Sens", tuneGrid=grid.rf, importance=TRUE, ntree=ntree)
+    rf.model<-train(had_covid~., data=df.train, method="rf", trControl=control.obj, metric="Accuracy", tuneGrid=grid.rf, importance=TRUE, ntree=ntree)
     index<-toString(ntree)
   results.trees[[index]]<-rf.model$results
 }
 
 output <-bind_rows(results.trees, .id = "ntrees")
-best.tune<-output[which.max(output[,"Sens"]),]
+best.tune<-output[which.max(output[,"Accuracy"]),]
 best.tune$mtry
 results.trees
 mtry.grid<-expand.grid(.mtry=best.tune$mtry)
@@ -203,22 +244,21 @@ mtry.grid<-expand.grid(.mtry=best.tune$mtry)
 ######
 #predicting vaccination
 feat.count2<-c(sqrt(ncol(df.train2)-1), log(ncol(df.train2)-1))
-
 grid.rf2<-expand.grid(mtry=feat.count2)
-
-control.obj2<-trainControl(method="cv", number=5,summaryFunction = twoClassSummary)
+control.obj2<-trainControl(method="cv", number=5)
 
 tree.num<-seq(100,300, by=100)
 results.trees2<-list()
+
 for (ntree in tree.num){
   set.seed(123)
-    rf.model2<-train(vaccinated~., data=df.train2, method="rf", trControl=control.obj2, metric="Sens", tuneGrid=grid.rf2, importance=TRUE, ntree=ntree)
+    rf.model2<-train(vaccinated~ PS + hoax + antiviral + early_vax_interest + combined_1, data=fdf.train, method="rf", trControl=control.obj2, metric="Accuracy", tuneGrid=grid.rf2, importance=TRUE, ntree=ntree)
     index<-toString(ntree)
   results.trees2[[index]]<-rf.model2$results
 }
 
 output2 <-bind_rows(results.trees2, .id = "ntrees")
-best.tune2<-output2[which.max(output2[,"Sens"]),]
+best.tune2<-output2[which.max(output2[,"Accuracy"]),]
 best.tune2$mtry
 results.trees2
 mtry.grid2<-expand.grid(.mtry=best.tune2$mtry)
@@ -227,10 +267,18 @@ mtry.grid2<-expand.grid(.mtry=best.tune2$mtry)
 
 ```{r random forest model}
 set.seed(123)
-    rf.model<-train(had_covid~., data=df.train, method="rf", trControl=control.obj, metric="Accuracy", tuneGrid=mtry.grid, importance=TRUE, summaryFunction = twoClassSummary,ntree=as.numeric(best.tune$ntrees))
+    rf.model<-train(had_covid~., data=df.train, method="rf", trControl=control.obj, metric="Accuracy", tuneGrid=mtry.grid, importance=TRUE,ntree=as.numeric(best.tune$ntrees))
 
 confusionMatrix(rf.model)
 varImp(rf.model)
+
+######
+#Model for vaccinated 
+set.seed(123)
+    rf.model2<-train(vaccinated~ age + race + hoax + early_vax_interest + combined_any, data=fdf.train, method="rf", trControl=control.obj2, metric="Accuracy", tuneGrid=mtry.grid2, importance=TRUE,ntree=as.numeric(best.tune2$ntrees))
+
+confusionMatrix(rf.model2)
+varImp(rf.model2)
 ```
 # Prediction on test set 
 
@@ -245,15 +293,25 @@ rf.probability<-rf.preds2[,2]
 
 cm = confusionMatrix(rf.preds, df.test$had_covid, positive = 'TRUE')
 cm
-
+'
 #Predict in test-set and output probabilities
 rf.preds<- rf.model2 %>% predict(df.test2)
 rf.preds2<- predict(rf.model2, df.test2, type="prob")
 
 #Pull out predicted probabilities for Diabetes=Yes
 rf.probability<-rf.preds2[,2]
+'
 
-cm = confusionMatrix(rf.preds, df.test2$vaccinated, positive = 'TRUE')
+#cm = confusionMatrix(rf.preds, df.test2$vaccinated, positive = 'TRUE')
+#cm
+
+rf.preds<- rf.model2 %>% predict(fdf.test)
+rf.preds2<- predict(rf.model2, fdf.test, type="prob")
+
+#Pull out predicted probabilities for Diabetes=Yes
+rf.probability<-rf.preds2[,2]
+
+cm = confusionMatrix(rf.preds, fdf.test$vaccinated, positive = 'TRUE')
 cm
 
 ```
