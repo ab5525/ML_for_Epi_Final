@@ -39,7 +39,7 @@ risk_exposure <- c(exposure_cols, risk_cols)
 
 fear_cols <- c()
 
-df[,interest_cols]
+df[,'booster']
 ```
 
 ```{r Some simplification}
@@ -98,11 +98,18 @@ df.train
 
 ### Unsupervised learning and clustering
 
+We were also interested in grouping participants by their interest in getting the vaccine. There are multiple components that contribute to vaccine interest, which include their early interest in the vaccine, whether they would or would not delay getting the vaccine for various reasons, and whether they would or would not delay getting their children the vaccine for various reasons.
+
+First, we needed to find the optimal number of clusters. There are several statistics that can be used to find the optimal number of clusters, and we chose the silhouette method.
+
 ```{r unsupervised}
+# calculate distance matrix
 dist.matrix <- dist(df[,interest_cols], method="euclidean")
+# hierarchical clustering
 h <- hclust(dist.matrix, method="complete")
 plot(h)
 
+# cut trees into various clusters and calculate silhouette score
 silhouette_score <- function(k){
     cluster <- cutree(tree=h, k=k)
     ss <- silhouette(cluster, dist.matrix)
@@ -111,15 +118,19 @@ silhouette_score <- function(k){
 
 k <- 2:20
 
+# calculate average silhouette score
 avg_sil <- sapply(k, silhouette_score)
 sil_df <- data.frame(Clusters=k, Score=avg_sil)
 p <- ggplot(sil_df, mapping=aes(x=Clusters, y=Score)) + geom_point(size=3) + labs(x="Number of Clusters", y="Silhouette Score") +
           theme(axis.line = element_line(colour = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_rect(fill = 'white'))
 
 print(p)
+```
 
-### although 2 clusters shows the highest silhouette score, it is not particularly informative (probably tells us only people who are interested vs not interested). 7 clusters seems to show a marked increase in score from 6 clusters, so that may be the best option to show patterns in vaccine interest.
+Here, our plot shows that 2 clusters has the highest silhouette score. Although this is technically the best 
+Although 2 clusters shows the highest silhouette score, it is not particularly informative (probably tells us only people who are interested vs not interested). 7 clusters seems to show a marked increase in score from 6 clusters, so that may be the best option to show patterns in vaccine interest.
 
+```{r}
 clustering <- cutree(tree=h, k=7)
 clustering <- as.factor(clustering)
 df$interest_cluster <- clustering
@@ -154,6 +165,19 @@ summary(logit)
 ```
 
 ```{r random forest tuning}
+train.control<-trainControl(method="cv", number=5, summaryFunction = twoClassSummary, sampling="down")
+
+tree.grid<-expand.grid(cp=seq(0.000001, 0.001, by=0.00005))
+
+tree.model <-train(had_covid~., data=df.train, method="rpart",trControl=train.control, tuneGrid=tree.grid, metric="Sens")
+
+tree.model$bestTune
+rpart.plot(tree.model$finalModel)
+
+confusionMatrix(tree.model)
+```
+
+```{r}
 
 feat.count<-c((ncol(df.train)-1)/2, sqrt(ncol(df.train)-1), (ncol(df.train)-1))
 
