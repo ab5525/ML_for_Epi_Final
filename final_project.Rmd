@@ -111,11 +111,11 @@ summary(df.train)
 
 We were also interested in grouping participants by their interest in getting the vaccine. There are multiple components that contribute to vaccine interest, which include their early interest in the vaccine, whether they would or would not delay getting the vaccine for various reasons, and whether they would or would not delay getting their children the vaccine for various reasons.
 
-First, we needed to find the optimal number of clusters. There are several statistics that can be used to find the optimal number of clusters, and we chose the silhouette method.
+First, we needed to find the optimal number of clusters. There are several statistics that can be used to find the optimal number, and we chose the silhouette method which compares the similarity of each point to other points in the cluster compared to other clusters.
 
 ```{r unsupervised}
 # calculate distance matrix
-dist.matrix <- dist(df[,interest_cols], method="euclidean")
+dist.matrix <- dist(df[,c(interest_cols, children_cols)], method="euclidean")
 # hierarchical clustering
 h <- hclust(dist.matrix, method="complete")
 plot(h)
@@ -138,23 +138,35 @@ p <- ggplot(sil_df, mapping=aes(x=Clusters, y=Score)) + geom_point(size=3) + lab
 print(p)
 ```
 
-Here, our plot shows that 2 clusters has the highest silhouette score. Although this is technically the best 
-Although 2 clusters shows the highest silhouette score, it is not particularly informative (probably tells us only people who are interested vs not interested). 7 clusters seems to show a marked increase in score from 6 clusters, so that may be the best option to show patterns in vaccine interest.
+Here, our plot shows that 2 clusters has the highest silhouette score. Although this is technically the best separation it is not that informative (i.e., the two clusters are most likely willing vs non-willing to get the vaccine). It is more interesting to divide into 8 clusters, which has the next highest silhouette score and shows a marked increase in score from 7 clusters.
 
 ```{r}
-clustering <- cutree(tree=h, k=7)
+clustering <- cutree(tree=h, k=8)
 clustering <- as.factor(clustering)
 df$interest_cluster <- clustering
-
-### each cluster has a different approach to interest. For example, cluster 1 are interested in vaccines early, and will not be delayed for any reason. Cluster 2 are interested in vaccines early, but they would delay for side effects and inconveniences for themselves although not for their children. Etc.
-
-df[df$interest_cluster == 1, interest_cols]
+### each cluster has a different "level of interest"
 ```
 
+*Cluster 1*
+Cluster 1 appears to have the the highest level of interest. They generally have early interest in getting vaccinated, and will not delay the vaccine for either themselves or their children, for any reason. This is the largest cluster.
 
-### logistic regression predictions
+```{r}
+summary(df[df$interest_cluster == 1, c(interest_cols, children_cols)])
+```
+
+*Cluster 2*
+Cluster 2 has an early interest in the vaccine, although they would delay the vaccine for themselves for fear of side effects or inconvenience (but not as much due to mistrust). However, they will not delay the vaccine for their children. 
+
+```{r}
+summary(df[df$interest_cluster == 2, c(interest_cols, children_cols)])
+```
+
+*Other Clusters*
+Other clusters have different patterns for how willing they are to get the vaccine, but they are minor in numbers so we will not go much deeper into them.
+
+
 ```{r logistic regression}
-
+### logistic regression predictions
 logit <- glm(had_covid ~ PS  + antiviral + booster+alcohol_use + air_travel + combined_2,
                     data=df, family=binomial(link="logit"))
 summary(logit)
@@ -356,3 +368,14 @@ calplot.rf<-(calibration(Class ~ rf.platt+rf, data=platt.prob.rf, class=TRUE, cu
 xyplot(calplot.rf, auto.key=list(columns=2))
 ```
 
+**Limitations**
+One of the limitations of our project is that the data itself was very difficult to process. Our data set was particularly large because it was a compilation of several surveys taken at different times throughout the pandemic. As a result, many of the questions we were interested in had several versions corresponding to different time points. In effect, this made it difficult to analyze the data because there was a high rate of dropout, where we would have less people responding to the newer version of the question compared to an older one. When this happens, we needed to make several assumptions to process the data. As an example, the question "in the past month, have you spent time in a mall?", was asked in 9 different surveys, and we chose to combine the results of only the 2 most recent surveys. We would consider a person as being exposed from the mall if the participant answered "Yes" in either survey. However, this assumes that a participant saying "Yes" in either has the same exposure risk as someone saying "Yes" in both surveys, which is probably not the case in real life.
+
+Also, the high rate of dropout also forced us to lose a large portion of our participants. We also acknowledge that the dropout/missing data may not necessarily be at random, which could possibly introduce selection bias into our results. The combination of high dropout, missing values, and unorganized data (requiring assumptions for processing) affects our ability to predict.
+
+**Ethical Considerations**
+The ethical considerations that our model has to deal with are racial biases and fair use of the model in the real world. The model that we built uses a data comprising of 65% White, compared to around 15% Hispanic and 7% Black. While this is more or less similar to the demographics across the entire United States, this model might not be applicable when looking at specific populations or groups of people, as individual groups may be more homogeneous than the entire US population. 
+
+This becomes an ethical problem when we try to apply our model into populations where the demographics vary greatly from the demographics used in our model. For example, we might unintentionally underpredict the rate of vaccination for a population, which may cause an undersupply of vaccinations for the people who probably need them most. It is also ethically troubling if we use this model to target specific populations simply because they are predicted to have lower or higher rates of vaccination - this would raise the question of whether the vaccine distribution is fair.
+
+In the same vein, our model predicts whether a person will get vaccinated or not, but the true public health problem at hand is to equitably distribute the vaccines. We need to be able to distinguish predicting a person's status of vaccination from that person's need for vaccination. So, we need to exercise lots of caution to translate predictability to real public health measures. 
